@@ -1,30 +1,24 @@
 from dataclasses import dataclass
 from enum import Enum, auto
+from pickle import TRUE
 from typing import List, Optional
 import re
 import sqlite3
 
-
 class ConditionType(Enum):
-    SUBJECT_IS = auto()
-    SUBJECT_IS_NOT = auto()
-    SUBJECT_MATCHES = auto()
-    SUBJECT_NOT_MATCHES = auto()
-    BODY_IS = auto()
-    BODY_IS_NOT = auto()
-    BODY_MATCHES = auto()
-    BODY_NOT_MATCHES = auto()
-    REPLY_TO_IS = auto()
-    REPLY_TO_IS_NOT = auto()
-    REPLY_TO_MATCHES = auto()
-    REPLY_TO_NOT_MATCHES = auto()
-    DOMAIN_IS = auto()
-    DOMAIN_IS_NOT = auto()
-    DOMAIN_MATCHES = auto()
-    DOMAIN_NOT_MATCHES = auto()
+    IS = auto()
+    IS_NOT = auto()
+    MATCHES = auto()
+    NOT_MATCHES = auto()
     # For SQL rules - the rule is considered to be matched if the query returns one or more rows.
     SQL = auto()
 
+class FieldType(Enum):
+    SUBJECT = auto
+    BODY = auto()
+    REPLY = auto()
+    DOMAIN = auto()
+    NONE = auto()
 
 @dataclass
 class Email:
@@ -45,7 +39,7 @@ class ScoredEmail(Email):
 class Condition:
     condition_type: ConditionType
     value: str
-
+    field_type: FieldType
 
 @dataclass
 class Rule:
@@ -65,6 +59,7 @@ class RuleEngine:
     def __init__(self, rules: List[Rule], database_location: Optional[str] = None):
         self.rules = rules
         self.con = None
+        # TODO: connect once
         if database_location:
             self.con = sqlite3.connect(database_location)
     
@@ -73,81 +68,75 @@ class RuleEngine:
         for rule in self.rules:
             if email.score > rule.min_score:
                 for condition in rule.conditions:
-                    match [condition.condition_type, condition.value]:
-                        case [ConditionType.SUBJECT_IS, value]:
-                            if email.subject == value.format(email=email):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.SUBJECT_MATCHES, value]:
-                            if re.match(value, email.subject):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.SUBJECT_IS_NOT, value]:
-                            if email.subject != value.format(email=email):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.SUBJECT_NOT_MATCHES, value]:
-                            if not re.match(value, email.subject):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.BODY_IS, value]:
-                            if email.body == value.format(email=email):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.BODY_MATCHES, value]:
-                            if re.match(value, email.body):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.BODY_IS_NOT, value]:
-                            if email.body != value.format(email=email):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.BODY_NOT_MATCHES, value]:
-                            if not re.match(value, email.body):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.REPLY_TO_IS, value]:
-                            if email.reply_to == value.format(email=email):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.REPLY_TO_MATCHES, value]:
-                            if re.match(value, email.reply_to):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.REPLY_TO_IS_NOT, value]:
-                            if email.reply_to != value.format(email=email):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.REPLY_TO_NOT_MATCHES, value]:
-                            if not re.match(value, email.reply_to):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.DOMAIN_IS, value]:
-                            if email.domain == value.format(email=email):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.DOMAIN_MATCHES, value]:
-                            if re.match(value, email.domain):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.DOMAIN_IS_NOT, value]:
-                            if email.domain != value.format(email=email):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.DOMAIN_NOT_MATCHES, value]:
-                            if not re.match(value, email.domain):
-                                matched_rules.append(rule.name)
-                            continue
-                        case [ConditionType.SQL, value]:
-                            if not self.con:
-                                raise RuntimeError("SQL conditions are not supported for this rules engine")
-                            if not value.lower().startswith("select"):
-                                raise RuntimeError("Only select statements are supported for SQL conditions")
-                            if len(self.con.execute(value.format(email=email)).fetchall()) > 0:
-                                matched_rules.append(rule.name)
-                            continue
+                    value = condition.value
+                    is_matched = False
+                    match condition.field_type:
+                        case FieldType.SUBJECT:
+                            is_matched = self.evaluate_subject(email, value, condition.condition_type)
+                        case FieldType.BODY:
+                            is_matched = self.evaluate_body(email, value, condition.condition_type)
+                        case FieldType.REPLY:
+                            is_matched = self.evaluate_reply_to(email, value, condition.condition_type)
+                        case FieldType.DOMAIN: 
+                            is_matched = self.evaluate_domain(email, value, condition.condition_type)
+                        case FieldType.NONE:
+                            if condition.condition_type == ConditionType.SQL:
+                                is_matched = self.evaluate_sql(email, value)
                         case _:
                             raise RuntimeError(
-                                "Encountered an unknown condition type"
+                                "Encountered an unknown field type"
                             )
+                    if is_matched:
+                        matched_rules.append(rule.name)        
         return matched_rules
+
+    def evaluate_sql(self, email, value) -> bool:
+        if not self.con:
+            raise RuntimeError("SQL conditions are not supported for this rules engine")
+        if not value.lower().startswith("select"):
+            raise RuntimeError("Only select statements are supported for SQL conditions")
+        return len(self.con.execute(self.format_email(email, value)).fetchall()) > 0
+
+    def evaluate_subject(self, email, value, type: ConditionType) -> bool:
+        if type == ConditionType.IS:
+            return email.subject == self.format_email(email, value)
+        if type == ConditionType.IS_NOT:
+            return email.subject != self.format_email(email, value)
+        if type == ConditionType.MATCHES:
+            return re.match(value, email.subject) != None
+        if type == ConditionType.NOT_MATCHES:
+            return re.match(value, email.subject) == None
+
+    def evaluate_body(self, email, value, type: ConditionType) -> bool:
+        if type == ConditionType.IS:
+            return email.body == self.format_email(email, value)
+        if type == ConditionType.IS_NOT:
+            return email.body != self.format_email(email, value)
+        if type == ConditionType.MATCHES:
+            return re.match(value, email.body) != None
+        if type == ConditionType.NOT_MATCHES:
+            return not re.match(value, email.body) == None
+
+    def evaluate_domain(self, email, value, type: ConditionType) -> bool:
+        if type == ConditionType.IS:
+            return email.domain == self.format_email(email, value)
+        if type == ConditionType.IS_NOT:
+            return email.domain != self.format_email(email, value)
+        if type == ConditionType.MATCHES:
+            return re.match(value, email.domain) != None
+        if type == ConditionType.NOT_MATCHES:
+            return not re.match(value, email.domain) == None
+
+    def evaluate_reply_to(self, email, value, type: ConditionType) -> bool:
+        if type == ConditionType.IS:
+            return email.reply_to == self.format_email(email, value)
+        if type == ConditionType.IS_NOT:
+            return email.reply_to != self.format_email(email, value)
+        if type == ConditionType.MATCHES:
+            return re.match(value, email.reply_to) != None
+        if type == ConditionType.NOT_MATCHES:
+            return not re.match(value, email.reply_to) == None
+
+    def format_email(self, email, value) -> str:
+        return value.format(email=email)
+    

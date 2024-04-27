@@ -12,8 +12,9 @@ RuleAlwaysMatch = rules_engine.Rule(
     min_score=0,
     conditions=[
         rules_engine.Condition(
-            condition_type=rules_engine.ConditionType.SUBJECT_MATCHES,
-            value=".*"
+            field_type=rules_engine.FieldType.SUBJECT,
+            condition_type=rules_engine.ConditionType.MATCHES,
+            value=".*",
         )
     ]
 )
@@ -24,7 +25,8 @@ RuleNeverMatch = rules_engine.Rule(
     min_score=0,
     conditions=[
         rules_engine.Condition(
-            condition_type=rules_engine.ConditionType.SUBJECT_MATCHES,
+            field_type=rules_engine.FieldType.SUBJECT,
+            condition_type=rules_engine.ConditionType.MATCHES,
             value="aaaaaaaaaaaomg"
         )
     ]
@@ -48,7 +50,8 @@ CompareFieldsRulesEngine = rules_engine.RuleEngine(
             min_score=0,
             conditions=[
                 rules_engine.Condition(
-                    condition_type=rules_engine.ConditionType.REPLY_TO_IS_NOT,
+                    field_type=rules_engine.FieldType.REPLY,
+                    condition_type=rules_engine.ConditionType.IS_NOT,
                     value="{email.from_email}"
                 )
             ]
@@ -58,7 +61,8 @@ CompareFieldsRulesEngine = rules_engine.RuleEngine(
             min_score=0,
             conditions=[
                 rules_engine.Condition(
-                    condition_type=rules_engine.ConditionType.DOMAIN_IS_NOT,
+                    field_type=rules_engine.FieldType.DOMAIN,
+                    condition_type=rules_engine.ConditionType.IS_NOT,
                     value="{email.company_domain}"
                 )
             ]
@@ -78,7 +82,8 @@ DBRulesEngine = rules_engine.RuleEngine(
                         "select 1 from bad_values "
                         "where instr(lower('{email.subject}'), lower(value)) > 0 "
                         "and type = 'subject'"
-                    )
+                    ),
+                    field_type=rules_engine.FieldType.NONE
                 )
             ]
         )
