@@ -84,7 +84,7 @@ DBRulesEngine = rules_engine.RuleEngine(
                         "and type = 'subject'"
                     ),
                     field_type=rules_engine.FieldType.NONE
-                )
+                )  
             ]
         )
     ],

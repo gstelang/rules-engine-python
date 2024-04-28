@@ -96,15 +96,18 @@ class RuleEngine:
     
     def evaluate_scored_email(self, email: ScoredEmail) -> List[str]:
         matched_rules = []
+        matchRuleEvaluator = MatchRuleEvaluator()
+        regexRuleEvaluator = RegexRuleEvaluator()
+        sqlRuleEvaluator = SQLRuleEvaluator(self.con)
         for rule in self.rules:
             if email.score > rule.min_score:
                 for condition in rule.conditions:
                     evaluator = {
-                        ConditionType.IS: MatchRuleEvaluator(),
-                        ConditionType.IS_NOT: MatchRuleEvaluator(),
-                        ConditionType.MATCHES: RegexRuleEvaluator(),
-                        ConditionType.NOT_MATCHES: RegexRuleEvaluator(),
-                        ConditionType.SQL: SQLRuleEvaluator(self.con)
+                        ConditionType.IS: matchRuleEvaluator,
+                        ConditionType.IS_NOT: matchRuleEvaluator,
+                        ConditionType.MATCHES: regexRuleEvaluator,
+                        ConditionType.NOT_MATCHES: regexRuleEvaluator,
+                        ConditionType.SQL: sqlRuleEvaluator
                     }[condition.condition_type]
                     is_matched = evaluator.evaluate(email, condition)
                     if is_matched:
